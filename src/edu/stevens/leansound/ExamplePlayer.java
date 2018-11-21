@@ -1,4 +1,4 @@
-package edu.stevens;
+package edu.stevens.leansound;
 /*
  * Cleaned up code from Jon Kristensen
  * @modified Dov Kruger
