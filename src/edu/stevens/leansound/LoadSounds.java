@@ -62,7 +62,7 @@ public class LoadSounds implements Runnable {
 	 * it will also need a size.
      */
     // The source data line onto which data can be written.
-    private SourceDataLine outputLine = null;
+    private SourceDataLine outputLine;
 
     // A three-dimensional an array with PCM information. 
     private float[][][] pcmInfo;
@@ -94,6 +94,7 @@ public class LoadSounds implements Runnable {
      *
      */
     public LoadSounds(String audioDBName, String dirName) {
+        outputLine = null;
         this.audioDBName = audioDBName;
         joggPacket = new Packet();
         joggPage = new Page();
@@ -106,6 +107,8 @@ public class LoadSounds implements Runnable {
         jorbisInfo = new Info();
         initializeJOrbis(); // initialize the library once
         offsets = new HashMap<>(64);
+        bufferSize = 2048;
+        buffer = new byte[bufferSize];
         load(dirName);
     }
 
