@@ -95,7 +95,6 @@ public class LoadSounds implements Runnable {
      */
     public LoadSounds(String audioDBName, String dirName) {
         this.audioDBName = audioDBName;
-        initializeJOrbis(); // initialize the library once
         joggPacket = new Packet();
         joggPage = new Page();
         joggStreamState = new StreamState();
@@ -105,6 +104,7 @@ public class LoadSounds implements Runnable {
         jorbisBlock = new Block(jorbisDspState);
         jorbisComment = new Comment();
         jorbisInfo = new Info();
+        initializeJOrbis(); // initialize the library once
         offsets = new HashMap<>(64);
         load(dirName);
     }
@@ -144,6 +144,7 @@ public class LoadSounds implements Runnable {
                 load(files[i], offset);
             } catch(Exception e) {
                 System.err.println("Failed to load" + files[i].getName());
+                e.printStackTrace();
             }
         }
     }
