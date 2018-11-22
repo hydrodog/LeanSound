@@ -263,6 +263,7 @@ public class SyncState{
   }
 
   public void init(){
+      //Whats going on here? We need to change this so we can reuse the object.
   }
 
   public int getDataOffset(){
