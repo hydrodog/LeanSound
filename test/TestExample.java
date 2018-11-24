@@ -7,11 +7,10 @@ import java.net.URL;
 public class TestExample {
     public static void main(String[] args) throws Exception {
         ExamplePlayer p = new ExamplePlayer();//ExamplePlayer.loadFile("clips/bell.ogg");
-
-
-        p.start();
-        p.addSong("clips/bell.ogg");
-        p.addSong("clips/shotgun.ogg");
+        p.addClip("clips/bell.ogg");
+        p.play();
+        
+        p.addClip("clips/shotgun.ogg");
         Thread.sleep(1000);
         p.stopCurrentSong();
         Thread.sleep(1000);
@@ -20,3 +19,4 @@ public class TestExample {
         // set a flag so that the next time the current player goes to get more data,it will stop playing this sound
     }
 }
+    

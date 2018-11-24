@@ -28,7 +28,7 @@ import javax.sound.sampled.SourceDataLine;
  * @author Jon Kristensen
  * @version 1.0
  */
-public class ExamplePlayer extends Thread {
+public class ExamplePlayer implements Runnable {
     // If you wish to debug this source, please set the variable below to true.
 
     private final boolean debugMode = true;
@@ -80,7 +80,7 @@ public class ExamplePlayer extends Thread {
     private Info jorbisInfo = new Info();
 
     //Itay Addition:
-    private ArrayList<InputStream> songs = new ArrayList();
+    private ArrayList<InputStream> clips = new ArrayList();
     private int songIndex = 0;
     private boolean playing = true;
 
@@ -100,10 +100,9 @@ public class ExamplePlayer extends Thread {
          */
         if (url != null) {
             ExamplePlayer examplePlayer = new ExamplePlayer(url);
-            examplePlayer.start();
+            examplePlayer.play();
         } else {
-            System.err.println("Please provide an argument with the file to "
-                    + "play.");
+            System.err.println("Please provide an argument with file to play.");
         }
     }
 
@@ -180,10 +179,10 @@ public class ExamplePlayer extends Thread {
      */
     public void run() {
         while (true) {
-            if (songs.size() > songIndex) {
+            if (clips.size() > songIndex) {
 
                 // Check that we got an InputStream.
-                if (songs.get(songIndex) == null) {
+                if (clips.get(songIndex) == null) {
                     System.err.println("We don't have an input stream and therefor "
                             + "cannot continue.");
                     return;
@@ -243,15 +242,15 @@ public class ExamplePlayer extends Thread {
         debugOutput("Starting to read the header.");
 
         /*
-		 * Variable used in loops below. While we need more data, we will
-		 * continue to read from the InputStream.
+	* Variable used in loops below. While we need more data, we will
+	* continue to read from the InputStream.
          */
         boolean needMoreData = true;
 
         /*
-		 * We will read the first three packets of the header. We start off by
-		 * defining packet = 1 and increment that value whenever we have
-		 * successfully read another packet.
+	* We will read the first three packets of the header. We start off by
+	* defining packet = 1 and increment that value whenever we have
+	* successfully read another packet.
          */
         int packet = 1;
 
@@ -264,7 +263,7 @@ public class ExamplePlayer extends Thread {
         while (needMoreData) {
             // Read from the InputStream.
             try {
-                count = songs.get(songIndex).read(buffer, index, bufferSize);
+                count = clips.get(songIndex).read(buffer, index, bufferSize);
             } catch (IOException exception) {
                 System.err.println("Could not read from the input stream.");
                 System.err.println(exception);
@@ -441,6 +440,110 @@ public class ExamplePlayer extends Thread {
         return true;
     }
 
+    private final void readHeaderPacket1(InputStream clip) throws IOException {
+        count = clip.read(buffer, index, bufferSize); // packet #1
+        joggSyncState.wrote(count); // inform jogg how many bytes read so far
+        switch (joggSyncState.pageout(joggPage)) {
+             case -1: // If there is a hole in the data, we must exit.
+                 throw new RuntimeException("hole in packet data #1");
+             case 1: { // Initialize and resets StreamState.
+                 joggStreamState.init(joggPage.serialno());
+                 joggStreamState.reset();
+
+                 // Initialize the Info and Comment objects.
+                 jorbisInfo.init();
+                 jorbisComment.init();
+
+                 // Check the page (serial number and stuff).
+                 if (joggStreamState.pagein(joggPage) == -1)
+                     throw new RuntimeException("error reading header page #1");
+
+                 // Try to extract a packet.
+                 if (joggStreamState.packetout(joggPacket) != 1)
+                     throw new RuntimeException("error reading header packet #1");
+             }
+             case 0:
+                 System.out.println("Why does this happen? What does it mean to have return 0?");
+        }        
+    }
+    
+    private final void readHeaderPacket23(InputStream clip, int packet) throws IOException {
+        count = clip.read(buffer, index, bufferSize); // packet #1
+        joggSyncState.wrote(count); // inform jogg how many bytes read so far
+         int status = joggSyncState.pageout(joggPage);
+         if (status == -1)
+             throw new RuntimeException("error:  hole in the packet data #" + packet);
+         if (status == 1) {
+             joggStreamState.pagein(joggPage);
+             status = joggStreamState.packetout(joggPacket);
+             if (status == -1)
+                 throw new RuntimeException("error: hole in packet data #" + packet);
+             if (status == 1)
+                 jorbisInfo.synthesis_headerin(jorbisComment, joggPacket);   
+         }
+    }
+    private void readClip() throws IOException {
+        // first deal with header
+        debugOutput("Reading the header");
+        InputStream clip = clips.get(songIndex);
+        readHeaderPacket1(clip);     // each clip will throw an exception to get out
+        readHeaderPacket23(clip, 2); // if necessary
+        readHeaderPacket23(clip, 3);
+
+        // Get the new index and an updated buffer.
+        index = joggSyncState.buffer(bufferSize);
+        buffer = joggSyncState.data;
+        debugOutput("Reading the body.");
+
+        boolean needMoreData = true;
+        do {
+            //Stop mid Sound if playing is false
+            if (!playing)
+                return; // early exit, termination  of clip requested by programmer
+            if (joggSyncState.pageout(joggPage) == 1) {
+                // Give the page to the StreamState object.
+                joggStreamState.pagein(joggPage);
+
+                if (joggPage.granulepos() == 0) // no more data is needed
+                    return; // get out, clip is done
+            }
+            // Process each packets.
+            processPackets:
+            while (true) {
+               switch(joggStreamState.packetout(joggPacket)) {
+               case 1:
+                   decodeCurrentPacket();
+                   break;
+               case 0:
+                   break processPackets;
+               case -1:
+                   debugOutput("hole in packet, continuing");
+               }
+
+               if (joggPage.eos() != 0) { // If page is the end-of-stream, done
+                   needMoreData = false;
+               }
+            }
+ 
+            // If we need more data...
+            if (needMoreData) {
+                // Get the new index and an updated buffer.
+                index = joggSyncState.buffer(bufferSize);
+                buffer = joggSyncState.data;
+                count = clip.read(buffer, index, bufferSize);
+                joggSyncState.wrote(count);  // Let SyncState know #bytes read.
+
+                if (count == 0) // There's no more data in the stream.
+                   needMoreData = false;
+            } else
+                debugOutput("waiting to resume");
+        } while (needMoreData);
+        debugOutput("Done reading the body.");
+    }
+
+    
+    
+    
     /**
      * This method starts the sound system. It starts with initializing the
      * <code>DspState</code> object, after which it sets up the
@@ -598,7 +701,7 @@ public class ExamplePlayer extends Thread {
 
                     // Read from the InputStream.
                     try {
-                        count = songs.get(songIndex).read(buffer, index, bufferSize);
+                        count = clips.get(songIndex).read(buffer, index, bufferSize);
                     } catch (Exception e) {
                         System.err.println(e);
                         return;
@@ -638,8 +741,8 @@ public class ExamplePlayer extends Thread {
 
         // Closes the stream.
         try {
-            if (songs.get(songIndex) != null) {
-                songs.get(songIndex).close();
+            if (clips.get(songIndex) != null) {
+                clips.get(songIndex).close();
             }
         } catch (Exception e) {
         }
@@ -747,16 +850,16 @@ public class ExamplePlayer extends Thread {
 
     }
 
-    public synchronized void addSong(String filename) {
+    public synchronized void addClip(String filename) {
         try {
-            songs.add(new FileInputStream(filename));
+            clips.add(new FileInputStream(filename));
         } catch (FileNotFoundException e) {
             System.err.println("Could not find file!");
         }
     }
 
     public synchronized void clearQueue() {
-        songs.clear();
+        clips.clear();
     }
 
     public void stopCurrentSong() {
@@ -768,6 +871,10 @@ public class ExamplePlayer extends Thread {
         playing = true;
         debugOutput("Resuming Song");
 
+    }
+    public void play() {
+        Thread t = new Thread(this);
+        t.start(); // because java threads are annoying and once terminated must be thrown away
     }
 
 }
