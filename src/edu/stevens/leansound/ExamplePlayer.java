@@ -3,6 +3,9 @@ package edu.stevens.leansound;
 /*
  * Cleaned up code from Jon Kristensen
  * @modified Dov Kruger
+ * @modified Itay Bachar
+ * This streamlined player lets the user add a sequence of sounds and then play them.
+ * Sounds are added to a queue, either by themselves or with a delay afterward.
  */
 import com.jcraft.jogg.*;
 import com.jcraft.jorbis.*;
@@ -15,6 +18,7 @@ import java.net.URL;
 import java.net.URLConnection;
 import java.net.UnknownServiceException;
 import java.util.ArrayList;
+import java.util.*;
 import javax.sound.sampled.AudioFormat;
 import javax.sound.sampled.AudioSystem;
 import javax.sound.sampled.DataLine;
@@ -80,8 +84,21 @@ public class ExamplePlayer implements Runnable {
     private Info jorbisInfo = new Info();
 
     //Itay Addition:
-    private ArrayList<InputStream> clips = new ArrayList();
-    private int songIndex = 0;
+    private static class Sound {
+        public InputStream s;
+        public int delay;
+        public Sound(InputStream s, int delay) { this.s = s; this.delay = delay; }
+        public void doDelay() {
+             if (delay > 0) {
+                try {
+                    Thread.sleep(delay);
+                } catch(InterruptedException e) {
+                }
+             }
+        }
+    }
+    private Queue<Sound> clips;
+//    private ArrayList<InputStream> clips = new ArrayList();
     private boolean playing = true;
 
     /**
@@ -179,32 +196,36 @@ public class ExamplePlayer implements Runnable {
      */
     public void run() {
         while (true) {
-            if (clips.size() > songIndex) {
-
-                // Check that we got an InputStream.
-                if (clips.get(songIndex) == null) {
-                    System.err.println("We don't have an input stream and therefor "
-                            + "cannot continue.");
-                    return;
-                }
-
-                // Initialize JOrbis.
-                initializeJOrbis();
-
+            synchronized(this) {
                 /*
-		 * If we can read the header, we try to inialize the sound system. If we
-		 * could initialize the sound system, we try to read the body.
-                 */
-                if (readHeader()) {
-                    if (initializeSound()) {
-                        readBody();
-                    }
+                while (clips.isEmpty()) {
+                    try {
+                        clips.wait(); // wait to be woken up when someone adds a new sound
+                    } catch(InterruptedException e) {}
                 }
-
-                // Afterwards, we clean up.
-                cleanUp();
-                songIndex++;
+                */
+                Sound sound = clips.remove();
+                if (sound == null)
+                    continue;
+                inputStream = sound.s;
+                sound.doDelay();
             }
+
+            // Initialize JOrbis.
+            initializeJOrbis();
+
+             /*
+              * If the header is readable, try to inialize the sound system. If that
+              * works, try to read the body.
+              */
+             if (readHeader()) {
+                 if (initializeSound()) {
+                    readBody();
+                 }
+             }
+
+             // Afterwards, clean up.
+             cleanUp();
         }
     }
 
@@ -263,7 +284,7 @@ public class ExamplePlayer implements Runnable {
         while (needMoreData) {
             // Read from the InputStream.
             try {
-                count = clips.get(songIndex).read(buffer, index, bufferSize);
+                count = inputStream.read(buffer, index, bufferSize);
             } catch (IOException exception) {
                 System.err.println("Could not read from the input stream.");
                 System.err.println(exception);
@@ -296,12 +317,12 @@ public class ExamplePlayer implements Runnable {
                         }
 
                         /*
-						 * We got where we wanted. We have successfully read the
-						 * first packet, and we will now initialize and reset
-						 * StreamState, and initialize the Info and Comment
-						 * objects. Afterwards we will check that the page
-						 * doesn't contain any errors, that the packet doesn't
-						 * contain any errors and that it's Vorbis data.
+                         * We got where we wanted. We have successfully read the
+                         * first packet, and we will now initialize and reset
+                         * StreamState, and initialize the Info and Comment
+                         * objects. Afterwards we will check that the page
+                         * doesn't contain any errors, that the packet doesn't
+                         * contain any errors and that it's Vorbis data.
                          */
                         case 1: {
                             // Initializes and resets StreamState.
@@ -320,8 +341,8 @@ public class ExamplePlayer implements Runnable {
                             }
 
                             /*
-							 * Try to extract a packet. All other return values
-							 * than "1" indicates there's something wrong.
+			 * Try to extract a packet. All other return values
+			 * than "1" indicates there's something wrong.
                              */
                             if (joggStreamState.packetout(joggPacket) != 1) {
                                 System.err.println("We got an error while "
@@ -485,7 +506,8 @@ public class ExamplePlayer implements Runnable {
     private void readClip() throws IOException {
         // first deal with header
         debugOutput("Reading the header");
-        InputStream clip = clips.get(songIndex);
+//        InputStream clip = clips.get(songIndex);
+        InputStream clip = inputStream;
         readHeaderPacket1(clip);     // each clip will throw an exception to get out
         readHeaderPacket23(clip, 2); // if necessary
         readHeaderPacket23(clip, 3);
@@ -701,7 +723,7 @@ public class ExamplePlayer implements Runnable {
 
                     // Read from the InputStream.
                     try {
-                        count = clips.get(songIndex).read(buffer, index, bufferSize);
+                        count = inputStream.read(buffer, index, bufferSize);
                     } catch (Exception e) {
                         System.err.println(e);
                         return;
@@ -741,12 +763,12 @@ public class ExamplePlayer implements Runnable {
 
         // Closes the stream.
         try {
-            if (clips.get(songIndex) != null) {
-                clips.get(songIndex).close();
+            if (inputStream != null) {
+                inputStream.close();
             }
         } catch (Exception e) {
         }
-
+        
         debugOutput("Done cleaning up.");
     }
 
@@ -847,12 +869,12 @@ public class ExamplePlayer implements Runnable {
 
     //Itay's Additions
     public ExamplePlayer() {
-
+        clips = new LinkedList<>();
     }
 
     public synchronized void addClip(String filename) {
         try {
-            clips.add(new FileInputStream(filename));
+            clips.add(new Sound(new FileInputStream(filename), 30));
         } catch (FileNotFoundException e) {
             System.err.println("Could not find file!");
         }
