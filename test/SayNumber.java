@@ -30,10 +30,10 @@ public class SayNumber {
         }
         if (n > 10) {
             if (n < 20) {
-                p.addClip(clip + teens[n-11] + ".ogg");
+                p.addClip(clip + n + ".ogg");
             } else {
                 int tens = n / 10;
-                p.addClip(clip + tensNames[tens] + ".ogg");
+                p.addClip(clip + tens*10 + ".ogg");
                 p.addClip(clip + n % 10 + ".ogg");
             }
         }
